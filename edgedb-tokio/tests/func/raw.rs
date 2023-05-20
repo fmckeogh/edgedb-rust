@@ -1,8 +1,8 @@
 use bytes::Bytes;
 
+use edgedb_protocol::common::Capabilities;
+use edgedb_protocol::common::{Cardinality, CompliationOptions, IoFormat};
 use edgedb_tokio::raw::Pool;
-use edgedb_protocol::common::{CompliationOptions, IoFormat, Cardinality};
-use edgedb_protocol::common::{Capabilities};
 
 use crate::server::SERVER;
 
@@ -11,15 +11,20 @@ async fn poll_connect() -> anyhow::Result<()> {
     let pool = Pool::new(&SERVER.config);
     let mut conn = pool.acquire().await?;
     assert!(conn.is_consistent());
-    let _prepare = conn.prepare(&CompliationOptions {
-        implicit_limit: None,
-        implicit_typenames: false,
-        implicit_typeids: false,
-        allow_capabilities: Capabilities::empty(),
-        explicit_objectids: true,
-        io_format: IoFormat::Binary,
-        expected_cardinality: Cardinality::Many,
-    }, "SELECT 7*8").await;
+    let _prepare = conn
+        .prepare(
+            &CompliationOptions {
+                implicit_limit: None,
+                implicit_typenames: false,
+                implicit_typeids: false,
+                allow_capabilities: Capabilities::empty(),
+                explicit_objectids: true,
+                io_format: IoFormat::Binary,
+                expected_cardinality: Cardinality::Many,
+            },
+            "SELECT 7*8",
+        )
+        .await;
     assert!(conn.is_consistent());
     let _descr = conn.describe_data().await?;
     assert!(conn.is_consistent());

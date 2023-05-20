@@ -1,7 +1,7 @@
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
 
-use tokio::sync::{Mutex};
+use tokio::sync::Mutex;
 
 use edgedb_tokio::{Client, Transaction};
 
@@ -15,30 +15,35 @@ impl OnceBarrier {
     }
     async fn wait(&self) {
         if self.0.load(Ordering::SeqCst) {
-            return
+            return;
         }
         self.1.wait().await;
         self.0.store(true, Ordering::SeqCst)
     }
 }
 
-async fn transaction1(client: Client, name: &str, iterations: Arc<AtomicUsize>,
-                      barrier: Arc<OnceBarrier>, lock: Arc<Mutex<()>>)
-    -> anyhow::Result<i32>
-{
-    let val = client.transaction(|mut tx| {
-        let lock = lock.clone();
-        let iterations = iterations.clone();
-        let barrier = barrier.clone();
-        async move {
-            iterations.fetch_add(1, Ordering::SeqCst);
-            // This magic query makes starts real transaction,
-            // that is otherwise started lazily
-            tx.query::<i64, _>("SELECT 1", &()).await?;
-            barrier.wait().await;
-            let val = {
-                let _lock = lock.lock().await;
-                tx.query_required_single("
+async fn transaction1(
+    client: Client,
+    name: &str,
+    iterations: Arc<AtomicUsize>,
+    barrier: Arc<OnceBarrier>,
+    lock: Arc<Mutex<()>>,
+) -> anyhow::Result<i32> {
+    let val = client
+        .transaction(|mut tx| {
+            let lock = lock.clone();
+            let iterations = iterations.clone();
+            let barrier = barrier.clone();
+            async move {
+                iterations.fetch_add(1, Ordering::SeqCst);
+                // This magic query makes starts real transaction,
+                // that is otherwise started lazily
+                tx.query::<i64, _>("SELECT 1", &()).await?;
+                barrier.wait().await;
+                let val = {
+                    let _lock = lock.lock().await;
+                    tx.query_required_single(
+                        "
                         SELECT (
                             INSERT test::Counter {
                                 name := <str>$0,
@@ -49,11 +54,15 @@ async fn transaction1(client: Client, name: &str, iterations: Arc<AtomicUsize>,
                                 SET { value := .value + 1 }
                             )
                         ).value
-                    ", &(name,)).await?
-            };
-            Ok(val)
-        }
-    }).await?;
+                    ",
+                        &(name,),
+                    )
+                    .await?
+                };
+                Ok(val)
+            }
+        })
+        .await?;
     Ok(val)
 }
 
@@ -79,10 +88,10 @@ async fn transaction_conflict() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_counter_value(tx: &mut Transaction, name: &str)
-    -> anyhow::Result<i32>
-{
-    let value = tx.query_required_single("
+async fn get_counter_value(tx: &mut Transaction, name: &str) -> anyhow::Result<i32> {
+    let value = tx
+        .query_required_single(
+            "
             SELECT (
                 INSERT test::Counter {
                     name := <str>$0,
@@ -93,30 +102,37 @@ async fn get_counter_value(tx: &mut Transaction, name: &str)
                     SET { value := .value + 1 }
                 )
             ).value
-        ", &(name,)).await?;
+        ",
+            &(name,),
+        )
+        .await?;
     Ok(value)
 }
 
 async fn transaction1e(
-    client: Client, name: &str, iterations: Arc<AtomicUsize>,
-    barrier: Arc<OnceBarrier>, lock: Arc<Mutex<()>>)
-    -> anyhow::Result<i32>
-{
-    let val = client.transaction(|mut tx| {
-        let lock = lock.clone();
-        let iterations = iterations.clone();
-        let barrier = barrier.clone();
-        async move {
-            iterations.fetch_add(1, Ordering::SeqCst);
-            // This magic query makes starts real transaction,
-            // that is otherwise started lazily
-            tx.query::<i64, _>("SELECT 1", &()).await?;
-            barrier.wait().await;
-            let _lock = lock.lock().await;
-            let val = get_counter_value(&mut tx, name).await?;
-            Ok(val)
-        }
-    }).await?;
+    client: Client,
+    name: &str,
+    iterations: Arc<AtomicUsize>,
+    barrier: Arc<OnceBarrier>,
+    lock: Arc<Mutex<()>>,
+) -> anyhow::Result<i32> {
+    let val = client
+        .transaction(|mut tx| {
+            let lock = lock.clone();
+            let iterations = iterations.clone();
+            let barrier = barrier.clone();
+            async move {
+                iterations.fetch_add(1, Ordering::SeqCst);
+                // This magic query makes starts real transaction,
+                // that is otherwise started lazily
+                tx.query::<i64, _>("SELECT 1", &()).await?;
+                barrier.wait().await;
+                let _lock = lock.lock().await;
+                let val = get_counter_value(&mut tx, name).await?;
+                Ok(val)
+            }
+        })
+        .await?;
     Ok(val)
 }
 

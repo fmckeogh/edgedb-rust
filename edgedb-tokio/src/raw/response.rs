@@ -2,29 +2,32 @@ use std::collections::VecDeque;
 use std::mem;
 
 use bytes::Bytes;
-use edgedb_errors::{Error, ErrorKind};
 use edgedb_errors::ProtocolEncodingError;
-use edgedb_errors::{ProtocolOutOfOrderError};
+use edgedb_errors::ProtocolOutOfOrderError;
+use edgedb_errors::{Error, ErrorKind};
 use edgedb_protocol::common::State;
-use edgedb_protocol::server_message::{ServerMessage, ErrorResponse};
-use edgedb_protocol::server_message::{CommandDataDescription1};
+use edgedb_protocol::server_message::CommandDataDescription1;
+use edgedb_protocol::server_message::{ErrorResponse, ServerMessage};
 use edgedb_protocol::QueryResult;
 
-use crate::raw::{Connection, Response};
 use crate::raw::queries::Guard;
-
+use crate::raw::{Connection, Response};
 
 enum Buffer {
     Reading(VecDeque<Bytes>),
     Rejecting,
-    Complete { status_data: Bytes, new_state: Option<State> },
+    Complete {
+        status_data: Bytes,
+        new_state: Option<State>,
+    },
     ErrorResponse(ErrorResponse),
     Error(Error),
     Reset,
 }
 
 pub struct ResponseStream<'a, T: QueryResult>
-    where T::State: Unpin,
+where
+    T::State: Unpin,
 {
     connection: &'a mut Connection,
     buffer: Buffer,
@@ -33,15 +36,15 @@ pub struct ResponseStream<'a, T: QueryResult>
 }
 
 impl<'a, T: QueryResult> ResponseStream<'a, T>
-    where T::State: Unpin,
+where
+    T::State: Unpin,
 {
-    pub(crate) fn new(connection: &'a mut Connection,
-               desc: &CommandDataDescription1,
-               guard: Guard)
-        -> Result<ResponseStream<'a, T>, Error>
-    {
-        let out_desc = desc.output()
-            .map_err(ProtocolEncodingError::with_source)?;
+    pub(crate) fn new(
+        connection: &'a mut Connection,
+        desc: &CommandDataDescription1,
+        guard: Guard,
+    ) -> Result<ResponseStream<'a, T>, Error> {
+        let out_desc = desc.output().map_err(ProtocolEncodingError::with_source)?;
         match out_desc.root_pos() {
             Some(root_pos) => {
                 let ctx = out_desc.as_queryable_context();
@@ -58,7 +61,7 @@ impl<'a, T: QueryResult> ResponseStream<'a, T>
                 buffer: Buffer::Rejecting,
                 state: None,
                 guard: Some(guard),
-            })
+            }),
         }
     }
     pub fn can_contain_data(&self) -> bool {
@@ -80,7 +83,8 @@ impl<'a, T: QueryResult> ResponseStream<'a, T>
                 }
                 Ok(ServerMessage::Data(_)) if self.state.is_some() => {}
                 Ok(ServerMessage::CommandComplete1(complete))
-                if self.guard.is_some() && self.connection.proto.is_1() => {
+                    if self.guard.is_some() && self.connection.proto.is_1() =>
+                {
                     self.buffer = Complete {
                         status_data: complete.status_data,
                         new_state: complete.state,
@@ -89,7 +93,8 @@ impl<'a, T: QueryResult> ResponseStream<'a, T>
                     return;
                 }
                 Ok(ServerMessage::CommandComplete0(complete))
-                if self.guard.is_some() && !self.connection.proto.is_1() => {
+                    if self.guard.is_some() && !self.connection.proto.is_1() =>
+                {
                     self.buffer = Complete {
                         status_data: complete.status_data,
                         new_state: None,
@@ -97,20 +102,21 @@ impl<'a, T: QueryResult> ResponseStream<'a, T>
                     self.expect_ready().await;
                     return;
                 }
-                Ok(ServerMessage::ErrorResponse(err))
-                if self.guard.is_some() => {
+                Ok(ServerMessage::ErrorResponse(err)) if self.guard.is_some() => {
                     let guard = self.guard.take().unwrap();
-                    self.connection.expect_ready_or_eos(guard).await
-                        .map_err(|e| log::warn!(
-                            "Error waiting for Ready after error: {e:#}"))
+                    self.connection
+                        .expect_ready_or_eos(guard)
+                        .await
+                        .map_err(|e| log::warn!("Error waiting for Ready after error: {e:#}"))
                         .ok();
                     self.buffer = ErrorResponse(err.into());
                     return;
                 }
                 Ok(msg) => {
-                    self.buffer = Error(
-                        ProtocolOutOfOrderError::with_message(format!(
-                        "Unsolicited message {:?}", msg)));
+                    self.buffer = Error(ProtocolOutOfOrderError::with_message(format!(
+                        "Unsolicited message {:?}",
+                        msg
+                    )));
                     return;
                 }
                 Err(e) => {
@@ -126,7 +132,9 @@ impl<'a, T: QueryResult> ResponseStream<'a, T>
         let Reading(ref mut buffer) = self.buffer else { return None };
         loop {
             if let Some(element) = buffer.pop_front() {
-                let state = self.state.as_mut()
+                let state = self
+                    .state
+                    .as_mut()
                     .expect("data packets are ignored if state is None");
                 match T::decode(state, &element) {
                     Ok(value) => return Some(value),
@@ -145,7 +153,8 @@ impl<'a, T: QueryResult> ResponseStream<'a, T>
                     buffer.extend(datum.data);
                 }
                 Ok(ServerMessage::CommandComplete1(complete))
-                if self.guard.is_some() && self.connection.proto.is_1() => {
+                    if self.guard.is_some() && self.connection.proto.is_1() =>
+                {
                     self.expect_ready().await;
                     self.buffer = Complete {
                         status_data: complete.status_data,
@@ -154,7 +163,8 @@ impl<'a, T: QueryResult> ResponseStream<'a, T>
                     return None;
                 }
                 Ok(ServerMessage::CommandComplete0(complete))
-                if self.guard.is_some() && !self.connection.proto.is_1() => {
+                    if self.guard.is_some() && !self.connection.proto.is_1() =>
+                {
                     self.expect_ready().await;
                     self.buffer = Complete {
                         status_data: complete.status_data,
@@ -162,20 +172,21 @@ impl<'a, T: QueryResult> ResponseStream<'a, T>
                     };
                     return None;
                 }
-                Ok(ServerMessage::ErrorResponse(err))
-                if self.guard.is_some() => {
+                Ok(ServerMessage::ErrorResponse(err)) if self.guard.is_some() => {
                     let guard = self.guard.take().unwrap();
-                    self.connection.expect_ready_or_eos(guard).await
-                        .map_err(|e| log::warn!(
-                            "Error waiting for Ready after error: {e:#}"))
+                    self.connection
+                        .expect_ready_or_eos(guard)
+                        .await
+                        .map_err(|e| log::warn!("Error waiting for Ready after error: {e:#}"))
                         .ok();
                     self.buffer = ErrorResponse(err.into());
                     return None;
                 }
                 Ok(msg) => {
-                    self.buffer = Error(
-                        ProtocolOutOfOrderError::with_message(format!(
-                        "Unsolicited message {:?}", msg)));
+                    self.buffer = Error(ProtocolOutOfOrderError::with_message(format!(
+                        "Unsolicited message {:?}",
+                        msg
+                    )));
                     return None;
                 }
                 Err(e) => {
@@ -196,8 +207,14 @@ impl<'a, T: QueryResult> ResponseStream<'a, T>
 
         match mem::replace(&mut self.buffer, Buffer::Reset) {
             Reading(_) | Rejecting => unreachable!(),
-            Complete { status_data, new_state }
-            => Ok(Response { status_data, new_state, data: () }),
+            Complete {
+                status_data,
+                new_state,
+            } => Ok(Response {
+                status_data,
+                new_state,
+                data: (),
+            }),
             Error(e) => Err(e),
             ErrorResponse(e) => Err(e.into()),
             Reset => panic!("process_complete() called twice"),

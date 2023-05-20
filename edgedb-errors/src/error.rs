@@ -5,10 +5,9 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::str;
 
-use crate::kinds::{tag_check, error_name};
-use crate::kinds::{UserError};
+use crate::kinds::UserError;
+use crate::kinds::{error_name, tag_check};
 use crate::traits::{ErrorKind, Field};
-
 
 const FIELD_HINT: u16 = 0x_00_01;
 const FIELD_DETAILS: u16 = 0x_00_02;
@@ -30,17 +29,14 @@ pub struct Chain<'a>(Option<&'a (dyn StdError + 'static)>);
 
 /// Tag that is used to group similar errors.
 #[derive(Clone, Copy)]
-pub struct Tag { pub(crate)  bit: u32 }
+pub struct Tag {
+    pub(crate) bit: u32,
+}
 
 pub(crate) enum Source {
     Box(Box<dyn StdError + Send + Sync + 'static>),
-    Ref(Box<
-        dyn AsRef<dyn StdError + Send + Sync + 'static>
-        + Send + Sync + 'static
-    >),
+    Ref(Box<dyn AsRef<dyn StdError + Send + Sync + 'static> + Send + Sync + 'static>),
 }
-
-
 
 #[derive(Debug)]
 pub(crate) struct Inner {
@@ -73,9 +69,7 @@ impl Error {
     pub fn headers(&self) -> &HashMap<u16, bytes::Bytes> {
         &self.0.headers
     }
-    pub fn with_headers(mut self, headers: HashMap<u16, bytes::Bytes>)
-        -> Error
-    {
+    pub fn with_headers(mut self, headers: HashMap<u16, bytes::Bytes>) -> Error {
         self.0.headers = headers;
         self
     }
@@ -88,7 +82,7 @@ impl Error {
     pub fn initial_message(&self) -> Option<&str> {
         self.0.messages.first().map(|m| &m[..])
     }
-    pub fn contexts(&self) -> impl DoubleEndedIterator<Item=&str> {
+    pub fn contexts(&self) -> impl DoubleEndedIterator<Item = &str> {
         self.0.messages.iter().skip(1).map(|m| &m[..])
     }
     fn header(&self, field: u16) -> Option<&str> {
@@ -105,7 +99,7 @@ impl Error {
             .map(|x| x as usize)
     }
     pub fn hint(&self) -> Option<&str> {
-        self.header( FIELD_HINT)
+        self.header(FIELD_HINT)
     }
     pub fn details(&self) -> Option<&str> {
         self.header(FIELD_DETAILS)
@@ -125,16 +119,14 @@ impl Error {
     pub fn column(&self) -> Option<usize> {
         self.usize_header(FIELD_COLUMN)
     }
-    pub(crate) fn unknown_headers(&self)
-        -> impl Iterator<Item=(&u16, &bytes::Bytes)>
-    {
+    pub(crate) fn unknown_headers(&self) -> impl Iterator<Item = (&u16, &bytes::Bytes)> {
         self.headers().iter().filter(|(key, _)| {
-            **key != FIELD_HINT &&
-                **key != FIELD_DETAILS &&
-                **key != FIELD_POSITION_START &&
-                **key != FIELD_POSITION_END &&
-                **key != FIELD_LINE &&
-                **key != FIELD_COLUMN
+            **key != FIELD_HINT
+                && **key != FIELD_DETAILS
+                && **key != FIELD_POSITION_START
+                && **key != FIELD_POSITION_END
+                && **key != FIELD_LINE
+                && **key != FIELD_COLUMN
         })
     }
     pub fn from_code(code: u32) -> Error {
@@ -154,14 +146,15 @@ impl Error {
         self
     }
     pub fn set<T: Field>(mut self, value: impl Into<T::Value>) -> Error {
-        self.0.fields.insert(
-            (T::NAME, TypeId::of::<T::Value>()),
-            Box::new(value.into()),
-        );
+        self.0
+            .fields
+            .insert((T::NAME, TypeId::of::<T::Value>()), Box::new(value.into()));
         self
     }
     pub fn get<T: Field>(&self) -> Option<&T::Value> {
-        self.0.fields.get(&(T::NAME, TypeId::of::<T::Value>()))
+        self.0
+            .fields
+            .get(&(T::NAME, TypeId::of::<T::Value>()))
             .and_then(|bx| bx.downcast_ref::<T::Value>())
     }
 }
@@ -181,7 +174,6 @@ impl fmt::Display for Error {
                     src = next;
                 }
             }
-
         } else {
             if let Some(last) = self.0.messages.last() {
                 write!(f, "{}: {}", kind, last)?;
@@ -221,8 +213,8 @@ impl fmt::Debug for Source {
 }
 
 impl<T> From<T> for Error
-    where T: AsRef<dyn StdError + Send + Sync + 'static>
-             + Send + Sync + 'static,
+where
+    T: AsRef<dyn StdError + Send + Sync + 'static> + Send + Sync + 'static,
 {
     fn from(err: T) -> Error {
         UserError::with_source_ref(err)

@@ -1,8 +1,8 @@
 //! Parameters returned by the server on initial handshake
-use std::collections::HashMap;
-use std::time::Duration;
-use std::fmt;
 use std::any::{Any, TypeId};
+use std::collections::HashMap;
+use std::fmt;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -34,8 +34,7 @@ impl ServerParam for PostgresAddress {
     type Value = PostgresAddress;
 }
 
-impl SealedParam for PostgresAddress { }
-
+impl SealedParam for PostgresAddress {}
 
 /// ParameterStatus_SystemConfig
 #[derive(Debug)]
@@ -47,7 +46,7 @@ impl ServerParam for SystemConfig {
     type Value = SystemConfig;
 }
 
-impl SealedParam for SystemConfig { }
+impl SealedParam for SystemConfig {}
 
 impl ServerParams {
     pub fn new() -> ServerParams {
@@ -57,6 +56,8 @@ impl ServerParams {
         self.0.insert(TypeId::of::<T>(), Box::new(value));
     }
     pub fn get<T: ServerParam>(&self) -> Option<&T::Value> {
-        self.0.get(&TypeId::of::<T>()).and_then(|v| v.downcast_ref())
+        self.0
+            .get(&TypeId::of::<T>())
+            .and_then(|v| v.downcast_ref())
     }
 }

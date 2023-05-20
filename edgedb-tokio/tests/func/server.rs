@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::{self, File};
-use std::io::{BufReader, BufRead};
+use std::io::{BufRead, BufReader};
 use std::os::unix::io::FromRawFd;
 use std::process;
 use std::sync::Mutex;
@@ -11,8 +11,7 @@ use shutdown_hooks;
 
 use edgedb_tokio::{Builder, Config};
 
-pub static SHUTDOWN_INFO: Lazy<Mutex<Vec<ShutdownInfo>>> =
-    Lazy::new(|| Mutex::new(Vec::new()));
+pub static SHUTDOWN_INFO: Lazy<Mutex<Vec<ShutdownInfo>>> = Lazy::new(|| Mutex::new(Vec::new()));
 pub static SERVER: Lazy<ServerGuard> = Lazy::new(|| ServerGuard::start());
 
 pub struct ShutdownInfo {
@@ -28,7 +27,6 @@ pub struct ServerInfo {
     port: u16,
     tls_cert_file: String,
 }
-
 
 impl ServerGuard {
     fn start() -> ServerGuard {
@@ -50,9 +48,10 @@ impl ServerGuard {
         cmd.arg("--emit-server-status=fd://3");
         cmd.arg("--port=auto");
         cmd.arg("--tls-cert-mode=generate_self_signed");
-        cmd.fd_mappings(vec![
-            FdMapping { parent_fd: pipe_write, child_fd: 3 }
-        ])?;
+        cmd.fd_mappings(vec![FdMapping {
+            parent_fd: pipe_write,
+            child_fd: 3,
+        }])?;
 
         if nix::unistd::Uid::effective().as_raw() == 0 {
             use std::os::unix::process::CommandExt;
@@ -61,16 +60,15 @@ impl ServerGuard {
             cmd.uid(1);
         }
 
-        let process = cmd.spawn()
-            .expect(&format!("Can run {}", bin_name));
+        let process = cmd.spawn().expect(&format!("Can run {}", bin_name));
         let pipe = BufReader::new(unsafe { File::from_raw_fd(pipe_read) });
         let mut result = Err(anyhow::anyhow!("no server info emitted"));
         for line in pipe.lines() {
             match line {
                 Ok(line) => {
                     if let Some(data) = line.strip_prefix("READY=") {
-                        let data: ServerInfo = serde_json::from_str(data)
-                            .expect("valid server data");
+                        let data: ServerInfo =
+                            serde_json::from_str(data).expect("valid server data");
                         println!("Server data {:?}", data);
                         result = Ok(data);
                         break;
@@ -94,31 +92,37 @@ impl ServerGuard {
         fs::remove_file("tests/func/dbschema/migrations/00001.edgeql").ok();
         assert!(Command::new("edgedb")
             .current_dir("./tests/func")
-            .arg("--tls-security").arg("insecure")
-            .arg("--port").arg(info.port.to_string())
+            .arg("--tls-security")
+            .arg("insecure")
+            .arg("--port")
+            .arg(info.port.to_string())
             .arg("migration")
             .arg("create")
             .arg("--non-interactive")
-            .status()?.success());
+            .status()?
+            .success());
         assert!(Command::new("edgedb")
             .current_dir("./tests/func")
-            .arg("--tls-security").arg("insecure")
-            .arg("--port").arg(info.port.to_string())
+            .arg("--tls-security")
+            .arg("insecure")
+            .arg("--port")
+            .arg(info.port.to_string())
             .arg("migration")
             .arg("apply")
-            .status()?.success());
+            .status()?
+            .success());
 
-        let cert_data = std::fs::read_to_string(&info.tls_cert_file)
-            .expect("cert file should be readable");
+        let cert_data =
+            std::fs::read_to_string(&info.tls_cert_file).expect("cert file should be readable");
         let config = Builder::new()
-             .port(info.port)?
-             .pem_certificates(&cert_data)?
-             .constrained_build()?;
+            .port(info.port)?
+            .pem_certificates(&cert_data)?
+            .constrained_build()?;
         Ok(ServerGuard { config })
     }
 }
 
-extern fn stop_processes() {
+extern "C" fn stop_processes() {
     let mut items = SHUTDOWN_INFO.lock().expect("shutdown mutex works");
     for item in items.iter_mut() {
         term_process(&mut item.process);
@@ -129,12 +133,10 @@ extern fn stop_processes() {
 }
 
 fn term_process(proc: &mut process::Child) {
-    use nix::unistd::Pid;
     use nix::sys::signal::{self, Signal};
+    use nix::unistd::Pid;
 
-    if let Err(e) = signal::kill(
-        Pid::from_raw(proc.id() as i32), Signal::SIGTERM
-    ) {
+    if let Err(e) = signal::kill(Pid::from_raw(proc.id() as i32), Signal::SIGTERM) {
         eprintln!("could not send SIGTERM to edgedb-server: {:?}", e);
     };
 }

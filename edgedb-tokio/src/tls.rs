@@ -3,13 +3,12 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::Context;
-use rustls::client::{ServerCertVerifier, ServerCertVerified};
+use rustls::client::{ServerCertVerified, ServerCertVerifier};
 use rustls::{Certificate, ServerName};
+use tls_api::TlsConnectorBox;
 use tls_api::{TlsConnector as _, TlsConnectorBuilder as _};
-use tls_api::{TlsConnectorBox};
-use tls_api_rustls::{TlsConnector};
-use webpki::{SignatureAlgorithm};
-
+use tls_api_rustls::TlsConnector;
+use webpki::SignatureAlgorithm;
 
 static SIG_ALGS: &[&SignatureAlgorithm] = &[
     &webpki::ECDSA_P256_SHA256,
@@ -38,63 +37,64 @@ pub struct OwnedTrustAnchor {
 
 impl NoHostnameVerifier {
     pub fn new(trust_anchors: Vec<OwnedTrustAnchor>) -> Self {
-        NoHostnameVerifier {
-            trust_anchors
-        }
+        NoHostnameVerifier { trust_anchors }
     }
 }
 
 impl ServerCertVerifier for NoHostnameVerifier {
-    fn verify_server_cert(&self,
+    fn verify_server_cert(
+        &self,
         end_entity: &Certificate,
         intermediates: &[Certificate],
         _server_name: &ServerName,
         _scts: &mut dyn Iterator<Item = &[u8]>,
         _ocsp_response: &[u8],
-        now: SystemTime
+        now: SystemTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
-        let webpki_now = webpki::Time::try_from(now)
-            .map_err(|_| rustls::Error::FailedToGetCurrentTime)?;
-        let end_entity: webpki::EndEntityCert = end_entity.0[..].try_into()
-            .map_err(|e| {
-                log::warn!("Could not parse TLS certificate {:#}", e);
-                pki_error(e)
-            })?;
-        let trust_roots = self.trust_anchors.iter()
+        let webpki_now =
+            webpki::Time::try_from(now).map_err(|_| rustls::Error::FailedToGetCurrentTime)?;
+        let end_entity: webpki::EndEntityCert = end_entity.0[..].try_into().map_err(|e| {
+            log::warn!("Could not parse TLS certificate {:#}", e);
+            pki_error(e)
+        })?;
+        let trust_roots = self
+            .trust_anchors
+            .iter()
             .map(Into::into)
             .collect::<Vec<_>>();
-        let chain = intermediates.iter()
-            .map(|c| c.as_ref())
-            .collect::<Vec<_>>();
-        end_entity.verify_is_valid_tls_server_cert(
-            &SIG_ALGS,
-            &webpki::TlsServerTrustAnchors(&trust_roots),
-            &chain,
-            webpki_now,
-        ).map_err(pki_error)?;
+        let chain = intermediates.iter().map(|c| c.as_ref()).collect::<Vec<_>>();
+        end_entity
+            .verify_is_valid_tls_server_cert(
+                &SIG_ALGS,
+                &webpki::TlsServerTrustAnchors(&trust_roots),
+                &chain,
+                webpki_now,
+            )
+            .map_err(pki_error)?;
         Ok(ServerCertVerified::assertion())
     }
 }
 
 impl ServerCertVerifier for NullVerifier {
-    fn verify_server_cert(&self,
+    fn verify_server_cert(
+        &self,
         _end_entity: &Certificate,
         _intermediates: &[Certificate],
         _server_name: &ServerName,
         _scts: &mut dyn Iterator<Item = &[u8]>,
         _ocsp_response: &[u8],
-        _now: SystemTime
+        _now: SystemTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
         Ok(ServerCertVerified::assertion())
     }
 }
 
-pub fn connector(
-    cert_verifier: Arc<dyn ServerCertVerifier>,
-) -> anyhow::Result<TlsConnectorBox>
-{
+pub fn connector(cert_verifier: Arc<dyn ServerCertVerifier>) -> anyhow::Result<TlsConnectorBox> {
     let mut builder = TlsConnector::builder()?;
-    builder.config.dangerous().set_certificate_verifier(cert_verifier);
+    builder
+        .config
+        .dangerous()
+        .set_certificate_verifier(cert_verifier);
     builder.set_alpn_protocols(&[b"edgedb-binary"])?;
     let connector = builder.build()?.into_dyn();
     Ok(connector)
@@ -140,15 +140,16 @@ impl OwnedTrustAnchor {
                 rustls_pemfile::Item::X509Certificate(data) => {
                     result.push(
                         webpki::TrustAnchor::try_from_cert_der(&data)
-                        .context("certificate data found, \
-                                 but trust anchor is invalid")?
-                        .into()
+                            .context(
+                                "certificate data found, \
+                                 but trust anchor is invalid",
+                            )?
+                            .into(),
                     );
                 }
-                | rustls_pemfile::Item::RSAKey(_)
+                rustls_pemfile::Item::RSAKey(_)
                 | rustls_pemfile::Item::PKCS8Key(_)
-                | rustls_pemfile::Item::ECKey(_)
-                => {
+                | rustls_pemfile::Item::ECKey(_) => {
                     log::debug!("Skipping private key in cert data");
                 }
                 _ => {
@@ -164,14 +165,10 @@ fn pki_error(error: webpki::Error) -> rustls::Error {
     use webpki::Error::*;
     match error {
         BadDer | BadDerTime => rustls::Error::InvalidCertificateEncoding,
-        InvalidSignatureForPublicKey
-            => rustls::Error::InvalidCertificateSignature,
-        UnsupportedSignatureAlgorithm
-        | UnsupportedSignatureAlgorithmForPublicKey
-        => rustls::Error::InvalidCertificateSignatureType,
-        e => {
-            rustls::Error::InvalidCertificateData(
-                format!("invalid peer certificate: {}", e))
+        InvalidSignatureForPublicKey => rustls::Error::InvalidCertificateSignature,
+        UnsupportedSignatureAlgorithm | UnsupportedSignatureAlgorithmForPublicKey => {
+            rustls::Error::InvalidCertificateSignatureType
         }
+        e => rustls::Error::InvalidCertificateData(format!("invalid peer certificate: {}", e)),
     }
 }

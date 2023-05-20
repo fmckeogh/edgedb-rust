@@ -1,33 +1,35 @@
-#![cfg_attr(not(feature="unstable"), allow(dead_code))]
+#![cfg_attr(not(feature = "unstable"), allow(dead_code))]
 
 mod connection;
+#[cfg(feature = "unstable")]
+mod dumps;
 mod options;
 mod queries;
 mod response;
 pub mod state;
-#[cfg(feature="unstable")] mod dumps;
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex as BlockingMutex};
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
-use tls_api::{TlsStream};
+use tls_api::TlsStream;
 use tokio::sync::{self, Semaphore};
 
+use edgedb_protocol::common::{Capabilities, RawTypedesc};
 use edgedb_protocol::features::ProtocolVersion;
-use edgedb_protocol::common::{RawTypedesc, Capabilities};
-use edgedb_protocol::server_message::{TransactionState};
+use edgedb_protocol::server_message::TransactionState;
 
-use crate::errors::{Error, ErrorKind, ClientError};
 use crate::builder::Config;
+use crate::errors::{ClientError, Error, ErrorKind};
 use crate::server_params::ServerParams;
 
 pub use options::Options;
-pub use response::{ResponseStream};
-pub use state::{State, PoolState};
+pub use response::ResponseStream;
+pub use state::{PoolState, State};
 
-#[cfg(feature="unstable")] pub use dumps::{DumpStream};
+#[cfg(feature = "unstable")]
+pub use dumps::DumpStream;
 
 #[derive(Clone, Debug)]
 pub struct Pool(Arc<PoolInner>);
@@ -47,7 +49,7 @@ struct PoolInner {
 #[derive(Debug)]
 pub struct PoolConnection {
     inner: Option<Connection>,
-    #[allow(dead_code)]  // needed only for Drop side effect
+    #[allow(dead_code)] // needed only for Drop side effect
     permit: sync::OwnedSemaphorePermit,
     pool: Arc<PoolInner>,
 }
@@ -93,7 +95,9 @@ impl edgedb_errors::Field for QueryCapabilities {
 
 impl Pool {
     pub fn new(config: &Config) -> Pool {
-        let concurrency = config.0.max_concurrency
+        let concurrency = config
+            .0
+            .max_concurrency
             // TODO(tailhook) use 1 and get concurrency from the connection
             .unwrap_or(crate::builder::DEFAULT_POOL_SIZE);
         Pool(Arc::new(PoolInner {
@@ -108,17 +112,19 @@ impl Pool {
 }
 
 impl PoolInner {
-    fn _next_conn(&self, _permit: &sync::OwnedSemaphorePermit)
-        -> Option<Connection>
-    {
-        self.queue.lock()
+    fn _next_conn(&self, _permit: &sync::OwnedSemaphorePermit) -> Option<Connection> {
+        self.queue
+            .lock()
             .expect("pool shared state mutex is not poisoned")
             .pop_front()
     }
     async fn acquire(self: &Arc<Self>) -> Result<PoolConnection, Error> {
-        let permit = self.semaphore.clone().acquire_owned().await
-            .map_err(|e| ClientError::with_source(e)
-                     .context("cannot acquire connection"))?;
+        let permit = self
+            .semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|e| ClientError::with_source(e).context("cannot acquire connection"))?;
         while let Some(mut conn) = self._next_conn(&permit) {
             assert!(conn.is_consistent());
             if conn.is_connection_reset().await {
@@ -144,7 +150,10 @@ impl PoolInner {
 
 impl PoolConnection {
     pub fn is_consistent(&self) -> bool {
-        self.inner.as_ref().map(|c| c.is_consistent()).unwrap_or(false)
+        self.inner
+            .as_ref()
+            .map(|c| c.is_consistent())
+            .unwrap_or(false)
     }
 }
 
@@ -152,7 +161,9 @@ impl Drop for PoolConnection {
     fn drop(&mut self) {
         if let Some(conn) = self.inner.take() {
             if conn.is_consistent() {
-                self.pool.queue.lock()
+                self.pool
+                    .queue
+                    .lock()
                     .expect("pool shared state mutex is not poisoned")
                     .push_back(conn);
             }
@@ -161,9 +172,7 @@ impl Drop for PoolConnection {
 }
 
 impl<T> Response<T> {
-    fn map<U, R>(self, f: impl FnOnce(T) -> Result<U, R>)
-        -> Result<Response<U>, R>
-    {
+    fn map<U, R>(self, f: impl FnOnce(T) -> Result<U, R>) -> Result<Response<U>, R> {
         Ok(Response {
             status_data: self.status_data,
             new_state: self.new_state,
